@@ -1,13 +1,16 @@
 """
-Scraper pro sreality.cz.
+Scraper pro reality.bazos.cz.
 
-Sreality je postavená na Next.js a výsledky hledání server-side renderuje
-přímo do HTML v elementu <script id="__NEXT_DATA__">. Nepotřebujeme tedy
-žádné neoficiální API ani headless browser - stačí stáhnout HTML stránky
-hledání a vytáhnout z něj vestavěný JSON. Tohle je ověřené na živém webu
-(červenec 2026).
+Bazos nemá zdokumentované API, ale výpis inzerátů je čisté server-rendered
+HTML (žádné JS), takže jde spolehlivě parsovat regexem/BeautifulSoup přímo
+z výpisu kategorie "Byty - prodej" s filtrem na lokalitu a cenu v URL
+(stejné parametry jako filtr nahoře na webu: hlokalita, humkreis, cenado).
+
+Pozor: parametry hlokalita/humkreis/cenado jsou odvozené z vyhledávacího
+formuláře na webu, ne z oficiální dokumentace - při prvním běhu zkontroluj
+v logu, že se pro každou lokalitu vrací rozumný počet inzerátů, a případně
+uprav LOCATION_QUERY.
 """
-import json
 import re
 import requests
 from bs4 import BeautifulSoup
@@ -22,106 +25,106 @@ HEADERS = {
     "Accept-Language": "cs-CZ,cs;q=0.9",
 }
 
-NEXT_DATA_RE = re.compile(
-    r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.DOTALL
+BASE_URL = "https://reality.bazos.cz/prodam/byt/"
+
+# Textový název lokality tak, jak ho čekává pole "Lokalita" ve vyhledávacím
+# formuláři bazos.cz (běžně obec/okres/PSČ).
+LOCATION_QUERY = {
+    "brno": "Brno",
+    "hradec-kralove": "Hradec Kralove",
+    "pardubice": "Pardubice",
+}
+
+LISTING_RE = re.compile(
+    r'href="(/inzerat/(\d+)/[^"]+\.php)"[^>]*>.*?</a>', re.DOTALL
 )
-
-AREA_RE = re.compile(r"(\d+)\s*m")
-
-
-def _extract_next_data(html: str):
-    m = NEXT_DATA_RE.search(html)
-    if not m:
-        return None
-    try:
-        return json.loads(m.group(1))
-    except json.JSONDecodeError:
-        return None
+PRICE_RE = re.compile(r"([\d\s]{4,})\s*Kč")
+LAYOUT_RE = re.compile(r"\b([1-6]\s?\+\s?(?:kk|1))\b", re.IGNORECASE)
+AREA_RE = re.compile(r"(\d+)\s*m2|(\d+)\s*m²")
 
 
-def _parse_area(name: str):
-    m = AREA_RE.search(name or "")
-    return int(m.group(1)) if m else None
+def _parse_listings(html: str):
+    soup = BeautifulSoup(html, "html.parser")
+    listings = []
+    seen_ids = set()
 
+    for a in soup.find_all("a", href=re.compile(r"^/inzerat/\d+/")):
+        m = re.search(r"/inzerat/(\d+)/", a["href"])
+        if not m:
+            continue
+        listing_id = m.group(1)
+        if listing_id in seen_ids:
+            continue
 
-def _build_detail_url(item: dict) -> str:
-    try:
-        subcat = item["categorySubCb"]["name"]  # e.g. "2+kk"
-        loc = item["locality"]
-        parts = [loc.get("citySeoName"), loc.get("cityPartSeoName"), loc.get("streetSeoName")]
-        parts = [p for p in parts if p]
-        slug = "-".join(parts) if parts else str(item["id"])
-        return f"https://www.sreality.cz/detail/prodej/byt/{subcat}/{slug}/{item['id']}"
-    except Exception:
-        # Fallback - alespoň odkaz na detail přes ID (nemusí být 100% přesný tvar,
-        # ale sreality běžně přesměruje na správnou stránku, pokud se ID najde).
-        return f"https://www.sreality.cz/hledani/prodej/byty?estate-id={item.get('id')}"
+        title = a.get_text(strip=True)
+        if not title:
+            continue  # obrázkové odkazy bez textu přeskočíme, počkáme na ten s nadpisem
 
+        seen_ids.add(listing_id)
 
-def _detail_matches_renovation(url: str) -> bool:
-    """Sreality ve výpisu hledání nedává k dispozici popis inzerátu (jen
-    název, cenu, dispozici), takže pro filtr na rekonstrukci musíme stáhnout
-    detail stránky a zkontrolovat celý text (popis, štítky apod.).
-    Voláno jen pro inzeráty, které už prošly cenou/dispozicí/plochou,
-    takže se nejedná o stovky požadavků navíc."""
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-        text = BeautifulSoup(resp.text, "html.parser").get_text(" ", strip=True)
-        return matches_renovation(text)
-    except Exception as e:
-        print(f"[sreality] Nepodařilo se ověřit popis detailu {url}: {e}")
-        return False
+        # cena a lokalita bývají v nejbližším rodičovském bloku inzerátu
+        container = a.find_parent("div") or a.parent
+        block_text = container.get_text(" ", strip=True) if container else title
+
+        price_m = PRICE_RE.search(block_text)
+        price = int(re.sub(r"\s", "", price_m.group(1))) if price_m else None
+
+        layout_m = LAYOUT_RE.search(title) or LAYOUT_RE.search(block_text)
+        area_m = AREA_RE.search(title) or AREA_RE.search(block_text)
+        area = None
+        if area_m:
+            area = int(area_m.group(1) or area_m.group(2))
+
+        url = f"https://reality.bazos.cz{a['href']}"
+
+        listings.append({
+            "id": listing_id,
+            "title": title,
+            "price_czk": price,
+            "layout": layout_m.group(1).replace(" ", "").lower() if layout_m else None,
+            "area_m2": area,
+            "url": url,
+            "raw_text": block_text,
+        })
+
+    return listings
 
 
 def fetch_new_listings(location: dict) -> list:
-    """Stáhne aktuální nabídky bytů k prodeji pro danou lokalitu ze sreality.cz."""
     seo = location["sreality_seo"]
-    url = f"https://www.sreality.cz/hledani/prodej/byty/{seo}"
+    loc_query = LOCATION_QUERY.get(seo)
+    if not loc_query:
+        return []
 
-    resp = requests.get(url, headers=HEADERS, timeout=20)
+    params = {
+        "hlokalita": loc_query,
+        "humkreis": "0",  # bez okolí navíc, jen daná obec
+        "cenado": str(MAX_PRICE_CZK),
+    }
+    resp = requests.get(BASE_URL, params=params, headers=HEADERS, timeout=20)
     resp.raise_for_status()
 
-    data = _extract_next_data(resp.text)
-    if not data:
-        raise RuntimeError(f"[sreality] Nepodařilo se najít __NEXT_DATA__ na {url} "
-                            f"- struktura stránky se možná změnila.")
-
-    queries = data["props"]["pageProps"]["dehydratedState"]["queries"]
-    es_query = next((q for q in queries if q["queryKey"][0] == "estatesSearch"), None)
-    if not es_query:
-        raise RuntimeError(f"[sreality] Nenašel jsem 'estatesSearch' data na {url}.")
-
-    results = es_query["state"]["data"]["results"][:MAX_LISTINGS_PER_SOURCE]
+    raw = _parse_listings(resp.text)[:MAX_LISTINGS_PER_SOURCE]
 
     listings = []
-    for item in results:
-        subcat_name = item.get("categorySubCb", {}).get("name", "")
-        if subcat_name not in DISPOSITIONS:
+    for c in raw:
+        if not c["layout"] or c["layout"] not in [d.lower().replace(" ", "") for d in DISPOSITIONS]:
             continue
-
-        price = item.get("priceCzk") or item.get("priceSummaryCzk")
-        if price is None or price <= 0 or price > MAX_PRICE_CZK:
+        if c["price_czk"] is None or c["price_czk"] > MAX_PRICE_CZK:
             continue
-
-        area = _parse_area(item.get("name", ""))
-        if MAX_AREA_M2 and area and area > MAX_AREA_M2:
+        if MAX_AREA_M2 and c["area_m2"] and c["area_m2"] > MAX_AREA_M2:
             continue
-
-        detail_url = _build_detail_url(item)
-
-        if REQUIRE_RENOVATION_KEYWORD and not _detail_matches_renovation(detail_url):
+        if REQUIRE_RENOVATION_KEYWORD and not matches_renovation(c["raw_text"]):
             continue
 
         listings.append({
-            "source": "sreality.cz",
-            "id": f"sreality-{item['id']}",
-            "title": item.get("name", "Byt"),
-            "price_czk": price,
-            "area_m2": area,
-            "location": f"{item.get('locality', {}).get('cityPart', '')}, "
-                        f"{item.get('locality', {}).get('city', '')}".strip(", "),
-            "url": detail_url,
+            "source": "bazos.cz",
+            "id": f"bazos-{c['id']}",
+            "title": c["title"],
+            "price_czk": c["price_czk"],
+            "area_m2": c["area_m2"],
+            "location": loc_query,
+            "url": c["url"],
         })
 
     return listings
@@ -131,7 +134,9 @@ def fetch_all() -> list:
     all_listings = []
     for loc in LOCATIONS:
         try:
-            all_listings.extend(fetch_new_listings(loc))
+            found = fetch_new_listings(loc)
+            print(f"[bazos] {loc['sreality_seo']}: {len(found)} shod po filtraci")
+            all_listings.extend(found)
         except Exception as e:
-            print(f"[sreality] Chyba při stahování pro {loc['sreality_seo']}: {e}")
+            print(f"[bazos] Chyba při stahování pro {loc['sreality_seo']}: {e}")
     return all_listings
