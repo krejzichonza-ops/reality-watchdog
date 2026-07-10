@@ -1,74 +1,51 @@
 """
-Konfigurace hlídacího psa na byty ke koupi.
-Uprav podle potřeby - lokality, cena, dispozice, plocha.
+Hlavní vstupní bod hlídacího psa.
+
+Spustí scrapery pro sreality.cz, bezrealitky.cz a bazos.cz, porovná
+výsledky s dosud viděnými inzeráty (data/seen.json), a pokud najde něco
+nového, pošle e-mail. Určeno ke spouštění periodicky přes GitHub Actions,
+ale funguje stejně dobře i lokálně (`python main.py`).
 """
+import sys
 
-# Lokality - používají se jako:
-#  - seo název v URL pro sreality.cz (napr. "brno", "hradec-kralove", "pardubice")
-#  - textový filtr pro bazos.cz a bezrealitky.cz (hledá se v adrese/lokalitě inzerátu)
-LOCATIONS = [
-    {"sreality_seo": "brno", "match_text": ["brno"]},
-    {"sreality_seo": "hradec-kralove", "match_text": ["hradec kralove", "hradec králové"]},
-    {"sreality_seo": "pardubice", "match_text": ["pardubice"]},
-]
+from scrapers import sreality, bezrealitky, bazos
+from storage import load_seen, save_seen, filter_new, prune_old
+from notifier import send_notification
 
-# Dispozice, které nás zajímají (2+kk a větší)
-DISPOSITIONS = ["2+kk", "2+1", "3+kk", "3+1", "4+kk", "4+1", "5+kk", "5+1", "6+"]
 
-# Cenový strop v Kč
-MAX_PRICE_CZK = 8_000_000
+def main():
+    print("=== Hlídací pes na reality - start ===")
 
-# Maximální plocha v m2 (0/None = neomezeno)
-MAX_AREA_M2 = 120
+    all_listings = []
+    for name, module in [("sreality", sreality), ("bezrealitky", bezrealitky), ("bazos", bazos)]:
+        try:
+            found = module.fetch_all()
+            print(f"[{name}] celkem po filtraci kritérií: {len(found)}")
+            all_listings.extend(found)
+        except Exception as e:
+            print(f"[{name}] CHYBA (portál se možná změnil): {e}")
 
-# --- Filtr na byty vhodné k rekonstrukci (flipování) ---
-# Pokud True, projdou dál jen inzeráty, jejichž text obsahuje některou
-# z RENOVATION_KEYWORDS frází A ZÁROVEŇ žádnou z RENOVATION_EXCLUDE_KEYWORDS
-# (ty vyřazují byty, které jsou už PO rekonstrukci - opak toho, co chceme).
-REQUIRE_RENOVATION_KEYWORD = True
+    seen = load_seen()
+    seen = prune_old(seen)
+    new_listings = filter_new(all_listings, seen)
 
-RENOVATION_KEYWORDS = [
-    "k rekonstrukci",
-    "před rekonstrukcí",
-    "nutná rekonstrukce",
-    "vyžaduje rekonstrukci",
-    "vyžaduje opravu",
-    "k opravě",
-    "původní stav",
-    "původní jádro",
-    "k modernizaci",
-    "špatný technický stav",
-    "špatný stavební stav",
-    "horší technický stav",
-    "investiční příležitost",
-    "developerská příležitost",
-    "po babičce",
-    "holobyt",
-    "nevhodné k bydlení",
-]
+    print(f"Nových inzerátů k odeslání: {len(new_listings)}")
 
-# Fráze, které i přes výskyt slova "rekonstrukce" znamenají, že byt je
-# UŽ ZREKONSTRUOVANÝ - takové chceme naopak vyřadit.
-RENOVATION_EXCLUDE_KEYWORDS = [
-    "po rekonstrukci",
-    "po kompletní rekonstrukci",
-    "po celkové rekonstrukci",
-    "kompletně zrekonstruovaný",
-    "kompletně zrekonstruovaná",
-    "zrekonstruovaný byt",
-    "zrekonstruovaná",
-    "čerstvě zrekonstruovaný",
-    "nově zrekonstruovaný",
-    "krásně zrekonstruovaný",
-]
+    if new_listings:
+        try:
+            send_notification(new_listings)
+            print("E-mail odeslán.")
+        except Exception as e:
+            print(f"CHYBA při odesílání e-mailu: {e}")
+            # I když se e-mail nepodaří odeslat, ID si stejně uložíme,
+            # ať se aspoň příště neposílají duplicity donekonečna kvůli
+            # dočasnému výpadku SMTP. Pokud bys chtěl radši retry příště,
+            # zakomentuj řádek se save_seen níže.
 
-# Kam posílat notifikace
-EMAIL_TO = "TVUJ_EMAIL@example.com"  # uprav
-EMAIL_FROM = "TVUJ_EMAIL@example.com"  # Gmail účet, ze kterého se bude odesílat
+    save_seen(seen)
+    print("=== Hotovo ===")
 
-# Kolik nejnovějších inzerátů max kontrolovat za běh na portál
-# (dostatečná rezerva, i kdyby přibylo hodně inzerátů mezi dvěma běhy)
-MAX_LISTINGS_PER_SOURCE = 120
 
-# Soubor, kam se ukládají už viděné inzeráty (aby se needlo posílat opakovaně)
-SEEN_STORE_PATH = "data/seen.json"
+if __name__ == "__main__":
+    main()
+    sys.exit(0)
