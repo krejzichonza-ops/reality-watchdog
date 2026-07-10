@@ -63,8 +63,8 @@ RENOVATION_EXCLUDE_KEYWORDS = [
 ]
 
 # Kam posílat notifikace
-EMAIL_TO = "TVUJ_EMAIL@example.com"  # uprav
-EMAIL_FROM = "TVUJ_EMAIL@example.com"  # Gmail účet, ze kterého se bude odesílat
+EMAIL_TO = "krejzic.honza@gmail.com"  # uprav
+EMAIL_FROM = "krejzic.honza@gmail.com"  # Gmail účet, ze kterého se bude odesílat
 
 # Kolik nejnovějších inzerátů max kontrolovat za běh na portál
 # (dostatečná rezerva, i kdyby přibylo hodně inzerátů mezi dvěma běhy)
