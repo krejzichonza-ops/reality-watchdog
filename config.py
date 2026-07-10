@@ -25,7 +25,7 @@ MAX_AREA_M2 = 120
 # Pokud True, projdou dál jen inzeráty, jejichž text obsahuje některou
 # z RENOVATION_KEYWORDS frází A ZÁROVEŇ žádnou z RENOVATION_EXCLUDE_KEYWORDS
 # (ty vyřazují byty, které jsou už PO rekonstrukci - opak toho, co chceme).
-REQUIRE_RENOVATION_KEYWORD = True
+REQUIRE_RENOVATION_KEYWORD = False
 
 RENOVATION_KEYWORDS = [
     "k rekonstrukci",
