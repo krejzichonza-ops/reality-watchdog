@@ -21,12 +21,19 @@ MAX_PRICE_CZK = 8_000_000
 # Maximální plocha v m2 (0/None = neomezeno)
 MAX_AREA_M2 = 120
 
-# --- Filtr na byty vhodné k rekonstrukci (flipování) ---
-# Pokud True, projdou dál jen inzeráty, jejichž text obsahuje některou
-# z RENOVATION_KEYWORDS frází A ZÁROVEŇ žádnou z RENOVATION_EXCLUDE_KEYWORDS
-# (ty vyřazují byty, které jsou už PO rekonstrukci - opak toho, co chceme).
-REQUIRE_RENOVATION_KEYWORD = False
-
+# --- Byty vhodné k rekonstrukci (flipování) ---
+# Netřídíme podle klíčových slov natvrdo (spousta bytů k rekonstrukci to
+# v inzerátu vůbec nezmíní) - místo toho posíláme VŠECHNY byty splňující
+# cenu/dispozici/plochu, a tyhle dva signály jen ZVÝRAZNÍME v e-mailu:
+#
+#  🔨 RENOVATION_KEYWORDS - inzerát to sám říká textem (viz níže)
+#  💰 UNDERVALUED - cena za m² je výrazně pod průměrem ostatních nalezených
+#     bytů ve stejné lokalitě v tomtéž běhu - silnější signál, funguje i
+#     u bytů, které o svém stavu mlčí.
+#
+# Fráze, které i přes výskyt slova "rekonstrukce" znamenají, že byt je
+# UŽ ZREKONSTRUOVANÝ, se z RENOVATION_KEYWORDS shody vždy vyloučí
+# (viz RENOVATION_EXCLUDE_KEYWORDS níže).
 RENOVATION_KEYWORDS = [
     "k rekonstrukci",
     "před rekonstrukcí",
@@ -47,8 +54,6 @@ RENOVATION_KEYWORDS = [
     "nevhodné k bydlení",
 ]
 
-# Fráze, které i přes výskyt slova "rekonstrukce" znamenají, že byt je
-# UŽ ZREKONSTRUOVANÝ - takové chceme naopak vyřadit.
 RENOVATION_EXCLUDE_KEYWORDS = [
     "po rekonstrukci",
     "po kompletní rekonstrukci",
@@ -62,8 +67,21 @@ RENOVATION_EXCLUDE_KEYWORDS = [
     "krásně zrekonstruovaný",
 ]
 
+# O kolik % musí být cena/m² pod průměrem lokality (v rámci téhož běhu),
+# aby se byt označil jako 💰 podhodnocený. 0.15 = o 15 % levnější než
+# průměr ostatních nalezených bytů ve stejném městě.
+UNDERVALUE_THRESHOLD_PCT = 0.15
+
+# Tvrdý strop na cenu/m² podle lokality (Kč/m²) - posílají se jen byty
+# POD touto hranicí. Hlavní páka na omezení počtu e-mailů.
+MAX_PRICE_PER_M2 = {
+    "brno": 90_000,
+    "hradec-kralove": 80_000,
+    "pardubice": 80_000,
+}
+
 # Kam posílat notifikace
-EMAIL_TO = "krejzic.honza@gmail.com"  # uprav
+EMAIL_TO = "krejzic.honza@gmail.com"
 EMAIL_FROM = "krejzic.honza@gmail.com"  # Gmail účet, ze kterého se bude odesílat
 
 # Kolik nejnovějších inzerátů max kontrolovat za běh na portál
