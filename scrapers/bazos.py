@@ -15,8 +15,7 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
-from config import LOCATIONS, DISPOSITIONS, MAX_PRICE_CZK, MAX_AREA_M2, MAX_LISTINGS_PER_SOURCE, \
-    REQUIRE_RENOVATION_KEYWORD
+from config import LOCATIONS, DISPOSITIONS, MAX_PRICE_CZK, MAX_AREA_M2, MAX_LISTINGS_PER_SOURCE
 from keywords import matches_renovation
 
 HEADERS = {
@@ -114,8 +113,6 @@ def fetch_new_listings(location: dict) -> list:
             continue
         if MAX_AREA_M2 and c["area_m2"] and c["area_m2"] > MAX_AREA_M2:
             continue
-        if REQUIRE_RENOVATION_KEYWORD and not matches_renovation(c["raw_text"]):
-            continue
 
         listings.append({
             "source": "bazos.cz",
@@ -123,7 +120,10 @@ def fetch_new_listings(location: dict) -> list:
             "title": c["title"],
             "price_czk": c["price_czk"],
             "area_m2": c["area_m2"],
+            "price_per_m2": round(c["price_czk"] / c["area_m2"]) if c["area_m2"] else None,
             "location": loc_query,
+            "location_key": seo,
+            "renovation_flag": matches_renovation(c["raw_text"]),
             "url": c["url"],
         })
 
