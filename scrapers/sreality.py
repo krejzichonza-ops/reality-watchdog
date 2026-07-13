@@ -12,8 +12,7 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
-from config import LOCATIONS, DISPOSITIONS, MAX_PRICE_CZK, MAX_AREA_M2, MAX_LISTINGS_PER_SOURCE, \
-    REQUIRE_RENOVATION_KEYWORD
+from config import LOCATIONS, DISPOSITIONS, MAX_PRICE_CZK, MAX_AREA_M2, MAX_LISTINGS_PER_SOURCE
 from keywords import matches_renovation
 
 HEADERS = {
@@ -109,9 +108,7 @@ def fetch_new_listings(location: dict) -> list:
             continue
 
         detail_url = _build_detail_url(item)
-
-        if REQUIRE_RENOVATION_KEYWORD and not _detail_matches_renovation(detail_url):
-            continue
+        renovation_flag = _detail_matches_renovation(detail_url)
 
         listings.append({
             "source": "sreality.cz",
@@ -119,8 +116,11 @@ def fetch_new_listings(location: dict) -> list:
             "title": item.get("name", "Byt"),
             "price_czk": price,
             "area_m2": area,
+            "price_per_m2": round(price / area) if area else None,
             "location": f"{item.get('locality', {}).get('cityPart', '')}, "
                         f"{item.get('locality', {}).get('city', '')}".strip(", "),
+            "location_key": seo,
+            "renovation_flag": renovation_flag,
             "url": detail_url,
         })
 
