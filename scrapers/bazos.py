@@ -1,15 +1,13 @@
 """
 Scraper pro reality.bazos.cz.
 
-Bazos nemá zdokumentované API, ale výpis inzerátů je čisté server-rendered
-HTML (žádné JS), takže jde spolehlivě parsovat regexem/BeautifulSoup přímo
-z výpisu kategorie "Byty - prodej" s filtrem na lokalitu a cenu v URL
-(stejné parametry jako filtr nahoře na webu: hlokalita, humkreis, cenado).
-
-Pozor: parametry hlokalita/humkreis/cenado jsou odvozené z vyhledávacího
-formuláře na webu, ne z oficiální dokumentace - při prvním běhu zkontroluj
-v logu, že se pro každou lokalitu vrací rozumný počet inzerátů, a případně
-uprav LOCATION_QUERY.
+Bazos nemá zdokumentované API a výpis inzerátů je čisté server-rendered
+HTML (žádné JS). POZOR: bazos v průběhu roku 2026 změnil URL strukturu -
+staré query-param URL (/prodam/byt/?hlokalita=...&cenado=...) teď vrací
+404. Aktuální funkční formát jsou SEO cesty typu
+/inzeraty/prodej-bytu-<mesto>/ (ověřeno živě). Filtr na cenu/plochu/
+dispozici proto děláme čistě klientsky (viz níže), URL už žádné
+parametry nenese.
 """
 import re
 import requests
@@ -21,22 +19,19 @@ from keywords import matches_renovation
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    "Accept-Language": "cs-CZ,cs;q=0.9",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.5",
+    "Referer": "https://www.google.com/",
 }
 
-BASE_URL = "https://reality.bazos.cz/prodam/byt/"
-
-# Textový název lokality tak, jak ho čekává pole "Lokalita" ve vyhledávacím
-# formuláři bazos.cz (běžně obec/okres/PSČ).
-LOCATION_QUERY = {
-    "brno": "Brno",
-    "hradec-kralove": "Hradec Kralove",
-    "pardubice": "Pardubice",
+# SEO cesta pro danou lokalitu (bez domény) - ověřeno vyhledáním, že tyto
+# stránky reálně existují a jsou indexované.
+LOCATION_SLUGS = {
+    "brno": "prodej-bytu-brno",
+    "hradec-kralove": "prodej-bytu-hradec-kralove",
+    "pardubice": "prodej-bytu-pardubice",
 }
 
-LISTING_RE = re.compile(
-    r'href="(/inzerat/(\d+)/[^"]+\.php)"[^>]*>.*?</a>', re.DOTALL
-)
 PRICE_RE = re.compile(r"([\d\s]{4,})\s*Kč")
 LAYOUT_RE = re.compile(r"\b([1-6]\s?\+\s?(?:kk|1))\b", re.IGNORECASE)
 AREA_RE = re.compile(r"(\d+)\s*m2|(\d+)\s*m²")
@@ -47,7 +42,7 @@ def _parse_listings(html: str):
     listings = []
     seen_ids = set()
 
-    for a in soup.find_all("a", href=re.compile(r"^/inzerat/\d+/")):
+    for a in soup.find_all("a", href=re.compile(r"/inzerat/\d+/")):
         m = re.search(r"/inzerat/(\d+)/", a["href"])
         if not m:
             continue
@@ -74,7 +69,8 @@ def _parse_listings(html: str):
         if area_m:
             area = int(area_m.group(1) or area_m.group(2))
 
-        url = f"https://reality.bazos.cz{a['href']}"
+        href = a["href"]
+        url = href if href.startswith("http") else f"https://reality.bazos.cz{href}"
 
         listings.append({
             "id": listing_id,
@@ -91,19 +87,17 @@ def _parse_listings(html: str):
 
 def fetch_new_listings(location: dict) -> list:
     seo = location["sreality_seo"]
-    loc_query = LOCATION_QUERY.get(seo)
-    if not loc_query:
+    slug = LOCATION_SLUGS.get(seo)
+    if not slug:
         return []
 
-    params = {
-        "hlokalita": loc_query,
-        "humkreis": "0",  # bez okolí navíc, jen daná obec
-        "cenado": str(MAX_PRICE_CZK),
-    }
-    resp = requests.get(BASE_URL, params=params, headers=HEADERS, timeout=20)
+    url = f"https://reality.bazos.cz/inzeraty/{slug}/"
+    resp = requests.get(url, headers=HEADERS, timeout=20)
     resp.raise_for_status()
 
     raw = _parse_listings(resp.text)[:MAX_LISTINGS_PER_SOURCE]
+    print(f"[bazos] {seo}: staženo {len(resp.text)} znaků HTML, "
+          f"nalezeno {len(raw)} inzerátů před filtrací")
 
     listings = []
     for c in raw:
@@ -121,7 +115,7 @@ def fetch_new_listings(location: dict) -> list:
             "price_czk": c["price_czk"],
             "area_m2": c["area_m2"],
             "price_per_m2": round(c["price_czk"] / c["area_m2"]) if c["area_m2"] else None,
-            "location": loc_query,
+            "location": seo,
             "location_key": seo,
             "renovation_flag": matches_renovation(c["raw_text"]),
             "url": c["url"],
