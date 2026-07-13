@@ -32,7 +32,7 @@ LOCATION_SLUGS = {
     "pardubice": "okres-pardubice",
 }
 
-DETAIL_HREF_RE = re.compile(r'href="(/properties-flats-houses/(\d+)-[^"]+)"')
+DETAIL_HREF_RE = re.compile(r'href="(?:https://www\.bezrealitky\.com)?(/properties-flats-houses/(\d+)-[^"]+)"')
 PRICE_RE = re.compile(r"CZK\s*([\d,\s]+?)(?:\(|<)")
 LAYOUT_RE = re.compile(r"\b([1-6]\+(?:kk|1))\b", re.IGNORECASE)
 
@@ -104,6 +104,8 @@ def fetch_new_listings(location: dict) -> list:
     resp.raise_for_status()
 
     raw_cards = _parse_cards(resp.text)[:MAX_LISTINGS_PER_SOURCE]
+    print(f"[bezrealitky] {seo}: staženo {len(resp.text)} znaků HTML, "
+          f"nalezeno {len(raw_cards)} karet inzerátů před filtrací")
 
     listings = []
     for c in raw_cards:
