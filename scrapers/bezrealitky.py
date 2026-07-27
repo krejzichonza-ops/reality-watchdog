@@ -99,7 +99,7 @@ def fetch_new_listings(location: dict) -> list:
     if not slug:
         return []
 
-    url = f"https://www.bezrealitky.com/listings/offer-sale/flat/{slug}"
+    url = f"https://www.bezrealitky.com/listings/offer-sale/flat/{slug}?order=timeOrder_desc"
     resp = requests.get(url, headers=HEADERS, timeout=20)
     resp.raise_for_status()
 
