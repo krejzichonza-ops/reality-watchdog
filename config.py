@@ -75,7 +75,7 @@ UNDERVALUE_THRESHOLD_PCT = 0.15
 # Tvrdý strop na cenu/m² podle lokality (Kč/m²) - posílají se jen byty
 # POD touto hranicí. Hlavní páka na omezení počtu e-mailů.
 MAX_PRICE_PER_M2 = {
-    "brno": 90_000,
+    "brno": 95_000,
     "hradec-kralove": 80_000,
     "pardubice": 80_000,
 }
